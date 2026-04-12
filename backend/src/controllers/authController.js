@@ -2,9 +2,14 @@ const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 
+const normalizeString = (value) =>
+  typeof value === 'string' ? value.trim() : '';
+
 const registerUser = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const username = normalizeString(req.body?.username);
+    const email = normalizeString(req.body?.email).toLowerCase();
+    const password = normalizeString(req.body?.password);
 
     if (!username || !email || !password) {
       return res.status(400).json({
@@ -51,7 +56,8 @@ const registerUser = async (req, res) => {
 
 const loginUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = normalizeString(req.body?.email).toLowerCase();
+    const password = normalizeString(req.body?.password);
 
     if (!email || !password) {
       return res.status(400).json({
@@ -103,7 +109,38 @@ const loginUser = async (req, res) => {
   }
 };
 
+const getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select(
+      '_id username email createdAt'
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        message: 'User not found',
+      });
+    }
+
+    return res.json({
+      message: 'Current user fetched successfully',
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error('Get me error:', error.message);
+
+    return res.status(500).json({
+      message: 'Server error while fetching current user',
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
+  getMe,
 };
