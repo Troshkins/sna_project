@@ -1,143 +1,110 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const asyncHandler = require('../utils/asyncHandler');
+const { httpError } = require('../utils/httpError');
+const {
+  normalizeString,
+  normalizeLowercaseString,
+} = require('../utils/validation');
 
-const normalizeString = (value) =>
-  typeof value === 'string' ? value.trim() : '';
+const registerUser = asyncHandler(async (req, res) => {
+  const username = normalizeString(req.body?.username);
+  const email = normalizeLowercaseString(req.body?.email);
+  const password = normalizeString(req.body?.password);
 
-const registerUser = async (req, res) => {
-  try {
-    const username = normalizeString(req.body?.username);
-    const email = normalizeString(req.body?.email).toLowerCase();
-    const password = normalizeString(req.body?.password);
-
-    if (!username || !email || !password) {
-      return res.status(400).json({
-        message: 'Username, email and password are required',
-      });
-    }
-
-    const existingUser = await User.findOne({
-      $or: [{ email }, { username }],
-    });
-
-    if (existingUser) {
-      return res.status(409).json({
-        message: 'User with this email or username already exists',
-      });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
-
-    const user = await User.create({
-      username,
-      email,
-      passwordHash,
-    });
-
-    return res.status(201).json({
-      message: 'User registered successfully',
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        createdAt: user.createdAt,
-      },
-    });
-  } catch (error) {
-    console.error('Register error:', error.message);
-
-    return res.status(500).json({
-      message: 'Server error during registration',
-    });
+  if (!username || !email || !password) {
+    throw httpError(400, 'Username, email and password are required');
   }
-};
 
-const loginUser = async (req, res) => {
-  try {
-    const email = normalizeString(req.body?.email).toLowerCase();
-    const password = normalizeString(req.body?.password);
+  const existingUser = await User.findOne({
+    $or: [{ email }, { username }],
+  });
 
-    if (!email || !password) {
-      return res.status(400).json({
-        message: 'Email and password are required',
-      });
-    }
-
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(401).json({
-        message: 'Invalid email or password',
-      });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.passwordHash);
-
-    if (!isMatch) {
-      return res.status(401).json({
-        message: 'Invalid email or password',
-      });
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user._id,
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: '1h',
-      }
-    );
-
-    return res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-      },
-    });
-  } catch (error) {
-    console.error('Login error:', error.message);
-
-    return res.status(500).json({
-      message: 'Server error during login',
-    });
+  if (existingUser) {
+    throw httpError(409, 'User with this email or username already exists');
   }
-};
 
-const getMe = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId).select(
-      '_id username email createdAt'
-    );
+  const salt = await bcrypt.genSalt(10);
+  const passwordHash = await bcrypt.hash(password, salt);
 
-    if (!user) {
-      return res.status(404).json({
-        message: 'User not found',
-      });
-    }
+  const user = await User.create({
+    username,
+    email,
+    passwordHash,
+  });
 
-    return res.json({
-      message: 'Current user fetched successfully',
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        createdAt: user.createdAt,
-      },
-    });
-  } catch (error) {
-    console.error('Get me error:', error.message);
+  return res.status(201).json({
+    message: 'User registered successfully',
+    user: {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      createdAt: user.createdAt,
+    },
+  });
+});
 
-    return res.status(500).json({
-      message: 'Server error while fetching current user',
-    });
+const loginUser = asyncHandler(async (req, res) => {
+  const email = normalizeLowercaseString(req.body?.email);
+  const password = normalizeString(req.body?.password);
+
+  if (!email || !password) {
+    throw httpError(400, 'Email and password are required');
   }
-};
+
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    throw httpError(401, 'Invalid email or password');
+  }
+
+  const isMatch = await bcrypt.compare(password, user.passwordHash);
+
+  if (!isMatch) {
+    throw httpError(401, 'Invalid email or password');
+  }
+
+  const token = jwt.sign(
+    {
+      userId: user._id,
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: '1h',
+    }
+  );
+
+  return res.json({
+    message: 'Login successful',
+    token,
+    user: {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+    },
+  });
+});
+
+const getMe = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.userId).select(
+    '_id username email createdAt'
+  );
+
+  if (!user) {
+    throw httpError(404, 'User not found');
+  }
+
+  return res.json({
+    message: 'Current user fetched successfully',
+    user: {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      createdAt: user.createdAt,
+    },
+  });
+});
 
 module.exports = {
   registerUser,

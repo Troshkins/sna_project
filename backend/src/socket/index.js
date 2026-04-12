@@ -3,19 +3,9 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const Message = require('../models/Message');
 const Room = require('../models/Room');
+const { getAllowedOrigins } = require('../utils/cors');
 
-const DEFAULT_FRONTEND_ORIGIN = 'http://localhost:3000';
 const MESSAGE_TEXT_MAX_LENGTH = 1000;
-
-const getAllowedOrigins = () => {
-  const configuredOrigins =
-    process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN || DEFAULT_FRONTEND_ORIGIN;
-
-  return configuredOrigins
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-};
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
@@ -112,6 +102,40 @@ const createSocketServer = (server) => {
         return socket.emit('joined_room', response);
       } catch (error) {
         const response = { message: 'Failed to join room' };
+
+        if (callback) {
+          return callback(response);
+        }
+
+        return socket.emit('socket_error', response);
+      }
+    });
+
+    socket.on('leave_room', async (payload = {}, callback) => {
+      try {
+        const roomId = normalizeString(payload.roomId);
+
+        if (!isValidObjectId(roomId)) {
+          const error = { message: 'Invalid room id' };
+
+          if (callback) {
+            return callback(error);
+          }
+
+          return socket.emit('socket_error', error);
+        }
+
+        await socket.leave(roomId);
+
+        const response = { roomId };
+
+        if (callback) {
+          return callback(null, response);
+        }
+
+        return socket.emit('left_room', response);
+      } catch (error) {
+        const response = { message: 'Failed to leave room' };
 
         if (callback) {
           return callback(response);
