@@ -11,6 +11,7 @@ const {
 const ROOM_NAME_MAX_LENGTH = 50;
 
 const normalizeRoomName = (value) => normalizeString(value);
+const normalizeRoomNameKey = (value) => normalizeRoomName(value).toLowerCase();
 
 const serializeRoom = (room) => ({
   id: String(room._id),
@@ -74,13 +75,21 @@ const validateRoomName = (value) => {
   return normalizedName;
 };
 
+const evictUserSocketsFromRoom = async (req, roomId, userId) => {
+  const io = req.app?.locals?.io;
+
+  if (!io?.evictUserFromRoom) {
+    return;
+  }
+
+  await io.evictUserFromRoom(roomId, userId);
+};
+
 const createRoom = asyncHandler(async (req, res) => {
   const normalizedName = validateRoomName(req.body?.name);
+  const normalizedNameKey = normalizeRoomNameKey(normalizedName);
 
-  const existingRoom = await Room.findOne({ name: normalizedName }).collation({
-    locale: 'en',
-    strength: 2,
-  });
+  const existingRoom = await Room.findOne({ normalizedName: normalizedNameKey });
 
   if (existingRoom) {
     throw httpError(409, 'Room with this name already exists');
@@ -101,6 +110,7 @@ const createRoom = asyncHandler(async (req, res) => {
 const updateRoom = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
   const normalizedName = validateRoomName(req.body?.name);
+  const normalizedNameKey = normalizeRoomNameKey(normalizedName);
 
   const room = await getRoomByIdOrThrow(roomId, '_id name createdBy createdAt');
 
@@ -110,10 +120,7 @@ const updateRoom = asyncHandler(async (req, res) => {
 
   const existingRoom = await Room.findOne({
     _id: { $ne: roomId },
-    name: normalizedName,
-  }).collation({
-    locale: 'en',
-    strength: 2,
+    normalizedName: normalizedNameKey,
   });
 
   if (existingRoom) {
@@ -179,7 +186,7 @@ const addRoomMember = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
   const userId = ensureObjectId(req.body?.userId, 'user id');
 
-  const room = await getRoomByIdOrThrow(roomId, '_id createdBy members');
+  const room = await getRoomByIdOrThrow(roomId, '_id name createdBy members');
 
   if (!ensureRoomCreator(room, req.user.userId)) {
     throw httpError(401, 'You are not allowed to manage members in this room');
@@ -212,7 +219,7 @@ const removeRoomMember = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
   const userId = ensureObjectId(req.params?.userId, 'user id');
 
-  const room = await getRoomByIdOrThrow(roomId, '_id createdBy members');
+  const room = await getRoomByIdOrThrow(roomId, '_id name createdBy members');
 
   if (!ensureRoomCreator(room, req.user.userId)) {
     throw httpError(401, 'You are not allowed to manage members in this room');
@@ -232,6 +239,7 @@ const removeRoomMember = asyncHandler(async (req, res) => {
 
   room.members.splice(memberIndex, 1);
   await room.save();
+  await evictUserSocketsFromRoom(req, roomId, userId);
 
   return res.json({
     message: 'Room member removed successfully',
@@ -243,7 +251,7 @@ const leaveRoom = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
   const userId = req.user.userId;
 
-  const room = await getRoomByIdOrThrow(roomId, '_id createdBy members');
+  const room = await getRoomByIdOrThrow(roomId, '_id name createdBy members');
 
   if (ensureRoomCreator(room, userId)) {
     throw httpError(400, 'Room creator cannot leave without transferring ownership');
@@ -259,6 +267,7 @@ const leaveRoom = asyncHandler(async (req, res) => {
 
   room.members.splice(memberIndex, 1);
   await room.save();
+  await evictUserSocketsFromRoom(req, roomId, userId);
 
   return res.json({
     message: 'You left the room successfully',

@@ -1,0 +1,56 @@
+1. High: Removed users can keep receiving room messages over existing Socket.IO connections.
+Where:
+- src/controllers/roomController.js:211-265
+- src/socket/index.js:94, 128, 210
+
+What is wrong:
+- `removeRoomMember` and `leaveRoom` only update MongoDB membership.
+- Existing sockets that already joined the Socket.IO room are never removed from that room.
+- `send_message` broadcasts with `io.to(roomId).emit(...)`, so a user who was removed from the room can continue receiving new messages until their socket disconnects or reconnects.
+
+Impact:
+- Authorization bypass for real-time message delivery.
+
+2. High: Room name uniqueness is enforced only in application code, so duplicates can still be created.
+Where:
+- src/controllers/roomController.js:80-87
+- src/controllers/roomController.js:111-121
+- src/models/Room.js:3-27
+
+What is wrong:
+- Create/update checks use `findOne(...).collation(...)`, but the `Room` schema has no unique index or normalized canonical field.
+- Two concurrent requests can both pass the existence check and insert/update duplicate room names.
+- This also means the "Room with this name already exists" rule is not guaranteed by the database.
+
+Impact:
+- Duplicate rooms with the same visible name can be persisted, breaking the API contract and making room lookup ambiguous for users.
+
+3. Medium: Concurrent registration can return 500 instead of 409 for duplicate users.
+Where:
+- src/controllers/authController.js:20-35
+- src/middlewares/errorHandler.js:4-25
+- src/models/User.js:3-24
+
+What is wrong:
+- Registration does a pre-check with `findOne`, then inserts with `User.create`.
+- If two requests register the same email/username at nearly the same time, MongoDB's unique index can reject one insert with `E11000`.
+- The error handler does not translate duplicate-key errors, so that request becomes a generic 500 instead of the expected conflict response.
+
+Impact:
+- Clients receive the wrong status code and message for a common race condition.
+
+4. Medium: Required environment variables are not validated at startup, producing misleading runtime failures.
+Where:
+- src/config/db.js:5
+- src/controllers/authController.js:68-76
+- src/middlewares/authMiddleware.js:21
+- src/socket/index.js:55
+- src/server.js:10-21
+
+What is wrong:
+- `MONGO_URI` and `JWT_SECRET` are used directly without a startup validation step.
+- Missing `MONGO_URI` causes connection failure during boot.
+- Missing `JWT_SECRET` causes login signing to throw and token verification to fail later in middleware and sockets, but those failures surface as generic auth/runtime errors instead of a clear configuration error.
+
+Impact:
+- Misconfiguration is harder to diagnose and can present as inconsistent 401/500 failures instead of a single explicit startup error.

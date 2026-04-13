@@ -3,12 +3,14 @@ require('dotenv').config();
 const http = require('http');
 const app = require('./app');
 const connectDB = require('./config/db');
+const { validateRequiredEnv } = require('./config/env');
 const { createSocketServer } = require('./socket');
 
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
+    validateRequiredEnv('MONGO_URI', 'JWT_SECRET');
     await connectDB();
 
     const server = http.createServer(app);

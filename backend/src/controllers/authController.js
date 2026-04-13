@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
-const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const { getRequiredEnv } = require('../config/env');
 const asyncHandler = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const {
@@ -69,7 +70,7 @@ const loginUser = asyncHandler(async (req, res) => {
     {
       userId: user._id,
     },
-    process.env.JWT_SECRET,
+    getRequiredEnv('JWT_SECRET'),
     {
       expiresIn: '1h',
     }

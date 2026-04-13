@@ -1,6 +1,7 @@
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const { getRequiredEnv } = require('../config/env');
 const Message = require('../models/Message');
 const Room = require('../models/Room');
 const { getAllowedOrigins } = require('../utils/cors');
@@ -45,6 +46,14 @@ const createSocketServer = (server) => {
   });
 
   io.use((socket, next) => {
+    let jwtSecret;
+
+    try {
+      jwtSecret = getRequiredEnv('JWT_SECRET');
+    } catch (error) {
+      return next(error);
+    }
+
     try {
       const { token } = socket.handshake.auth || {};
 
@@ -52,7 +61,7 @@ const createSocketServer = (server) => {
         return next(new Error('Authentication error'));
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, jwtSecret);
 
       socket.user = {
         userId: decoded.userId,
@@ -63,6 +72,16 @@ const createSocketServer = (server) => {
       return next(new Error('Authentication error'));
     }
   });
+
+  io.evictUserFromRoom = async (roomId, userId) => {
+    const sockets = await io.in(roomId).fetchSockets();
+
+    await Promise.all(
+      sockets
+        .filter((socket) => socket.user?.userId === userId)
+        .map((socket) => socket.leave(roomId))
+    );
+  };
 
   io.on('connection', (socket) => {
     socket.on('join_room', async (payload = {}, callback) => {

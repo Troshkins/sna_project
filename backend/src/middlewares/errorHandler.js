@@ -1,8 +1,31 @@
 const { HttpError } = require('../utils/httpError');
 
+const getDuplicateKeyMessage = (error) => {
+  const duplicateFields = Object.keys(error.keyPattern || error.keyValue || {});
+
+  if (
+    duplicateFields.includes('email') ||
+    duplicateFields.includes('username')
+  ) {
+    return 'User with this email or username already exists';
+  }
+
+  if (duplicateFields.includes('normalizedName')) {
+    return 'Room with this name already exists';
+  }
+
+  return 'Resource already exists';
+};
+
 const errorHandler = (error, req, res, next) => {
   if (res.headersSent) {
     return next(error);
+  }
+
+  if (error?.code === 11000) {
+    return res.status(409).json({
+      message: getDuplicateKeyMessage(error),
+    });
   }
 
   const statusCode =
