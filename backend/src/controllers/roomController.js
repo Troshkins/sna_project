@@ -12,13 +12,11 @@ const ROOM_NAME_MAX_LENGTH = 50;
 
 const normalizeRoomName = (value) => normalizeString(value);
 const normalizeRoomNameKey = (value) => normalizeRoomName(value).toLowerCase();
-
-const serializeRoom = (room) => ({
-  id: String(room._id),
-  name: room.name,
-  createdBy: room.createdBy ? String(room.createdBy._id || room.createdBy) : null,
-  createdAt: room.createdAt,
-});
+const buildDirectKey = (memberIds) =>
+  memberIds
+    .map((memberId) => String(memberId))
+    .sort()
+    .join(':');
 
 const serializeMember = (member) => ({
   id: String(member._id),
@@ -26,8 +24,35 @@ const serializeMember = (member) => ({
   email: member.email,
 });
 
+const serializeRoom = (room) => {
+  const serializedRoom = {
+    id: String(room._id),
+    roomType: room.roomType || 'group',
+    createdBy: room.createdBy ? String(room.createdBy._id || room.createdBy) : null,
+    createdAt: room.createdAt,
+  };
+
+  if (serializedRoom.roomType === 'direct') {
+    serializedRoom.members = Array.isArray(room.members)
+      ? room.members.map(serializeMember)
+      : [];
+
+    return serializedRoom;
+  }
+
+  serializedRoom.name = room.name;
+
+  return serializedRoom;
+};
+
 const ensureRoomCreator = (room, userId) =>
   String(room.createdBy._id || room.createdBy) === userId;
+
+const ensureGroupRoom = (room, action) => {
+  if (room.roomType === 'direct') {
+    throw httpError(400, `Direct rooms cannot ${action}`);
+  }
+};
 
 const ensureRoomMembership = (room, userId) => {
   const isMember = room.members.some(
@@ -75,6 +100,22 @@ const validateRoomName = (value) => {
   return normalizedName;
 };
 
+const validateDirectParticipant = (currentUserId, targetUserId) => {
+  if (targetUserId === currentUserId) {
+    throw httpError(400, 'You cannot create a direct room with yourself');
+  }
+
+  return targetUserId;
+};
+
+const findDirectRoomByMembers = async (memberIds) =>
+  Room.findOne({
+    roomType: 'direct',
+    directKey: buildDirectKey(memberIds),
+  })
+    .select('_id roomType name members createdBy createdAt')
+    .populate('members', 'username email');
+
 const evictUserSocketsFromRoom = async (req, roomId, userId) => {
   const io = req.app?.locals?.io;
 
@@ -107,12 +148,71 @@ const createRoom = asyncHandler(async (req, res) => {
   });
 });
 
+const createDirectRoom = asyncHandler(async (req, res) => {
+  const currentUserId = req.user.userId;
+  const targetUserId = validateDirectParticipant(
+    currentUserId,
+    ensureObjectId(req.body?.userId, 'user id')
+  );
+
+  const targetUser = await User.findById(targetUserId).select('_id');
+
+  if (!targetUser) {
+    throw httpError(404, 'User not found');
+  }
+
+  const existingRoom = await findDirectRoomByMembers([
+    currentUserId,
+    targetUserId,
+  ]);
+
+  if (existingRoom) {
+    return res.json({
+      message: 'Direct room fetched successfully',
+      room: serializeRoom(existingRoom),
+    });
+  }
+
+  try {
+    const room = await Room.create({
+      roomType: 'direct',
+      createdBy: currentUserId,
+      members: [currentUserId, targetUser._id],
+    });
+
+    await room.populate('members', 'username email');
+
+    return res.status(201).json({
+      message: 'Direct room created successfully',
+      room: serializeRoom(room),
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      const room = await findDirectRoomByMembers([currentUserId, targetUserId]);
+
+      if (room) {
+        return res.json({
+          message: 'Direct room fetched successfully',
+          room: serializeRoom(room),
+        });
+      }
+    }
+
+    throw error;
+  }
+});
+
 const updateRoom = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
   const normalizedName = validateRoomName(req.body?.name);
   const normalizedNameKey = normalizeRoomNameKey(normalizedName);
 
-  const room = await getRoomByIdOrThrow(roomId, '_id name createdBy createdAt');
+  const room = await getRoomByIdOrThrow(
+    roomId,
+    '_id name roomType createdBy createdAt'
+  );
+
+  ensureGroupRoom(room, 'be renamed');
 
   if (!ensureRoomCreator(room, req.user.userId)) {
     throw httpError(401, 'You are not allowed to edit this room');
@@ -138,7 +238,8 @@ const updateRoom = asyncHandler(async (req, res) => {
 
 const getRooms = asyncHandler(async (req, res) => {
   const rooms = await Room.find({ members: req.user.userId })
-    .select('_id name createdBy createdAt')
+    .select('_id roomType name members createdBy createdAt')
+    .populate('members', 'username email')
     .sort({ createdAt: -1 })
     .lean();
 
@@ -151,7 +252,12 @@ const getRooms = asyncHandler(async (req, res) => {
 const deleteRoom = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
 
-  const room = await getRoomByIdOrThrow(roomId, '_id name createdBy createdAt');
+  const room = await getRoomByIdOrThrow(
+    roomId,
+    '_id name roomType createdBy createdAt'
+  );
+
+  ensureGroupRoom(room, 'be deleted');
 
   if (!ensureRoomCreator(room, req.user.userId)) {
     throw httpError(401, 'You are not allowed to delete this room');
@@ -171,8 +277,10 @@ const getRoomById = asyncHandler(async (req, res) => {
 
   const room = await getRoomByIdOrThrow(
     roomId,
-    '_id name createdBy members createdAt'
+    '_id roomType name createdBy members createdAt'
   );
+
+  await room.populate('members', 'username email');
 
   ensureRoomMembership(room, req.user.userId);
 
@@ -186,7 +294,12 @@ const addRoomMember = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
   const userId = ensureObjectId(req.body?.userId, 'user id');
 
-  const room = await getRoomByIdOrThrow(roomId, '_id name createdBy members');
+  const room = await getRoomByIdOrThrow(
+    roomId,
+    '_id name roomType createdBy members'
+  );
+
+  ensureGroupRoom(room, 'add members');
 
   if (!ensureRoomCreator(room, req.user.userId)) {
     throw httpError(401, 'You are not allowed to manage members in this room');
@@ -219,7 +332,12 @@ const removeRoomMember = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
   const userId = ensureObjectId(req.params?.userId, 'user id');
 
-  const room = await getRoomByIdOrThrow(roomId, '_id name createdBy members');
+  const room = await getRoomByIdOrThrow(
+    roomId,
+    '_id name roomType createdBy members'
+  );
+
+  ensureGroupRoom(room, 'remove members');
 
   if (!ensureRoomCreator(room, req.user.userId)) {
     throw httpError(401, 'You are not allowed to manage members in this room');
@@ -251,7 +369,12 @@ const leaveRoom = asyncHandler(async (req, res) => {
   const roomId = ensureObjectId(req.params?.id, 'room id');
   const userId = req.user.userId;
 
-  const room = await getRoomByIdOrThrow(roomId, '_id name createdBy members');
+  const room = await getRoomByIdOrThrow(
+    roomId,
+    '_id name roomType createdBy members'
+  );
+
+  ensureGroupRoom(room, 'be left');
 
   if (ensureRoomCreator(room, userId)) {
     throw httpError(400, 'Room creator cannot leave without transferring ownership');
@@ -296,6 +419,7 @@ const getRoomMembers = asyncHandler(async (req, res) => {
 
 module.exports = {
   createRoom,
+  createDirectRoom,
   updateRoom,
   getRooms,
   getRoomById,

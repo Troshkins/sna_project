@@ -14,6 +14,10 @@ const getDuplicateKeyMessage = (error) => {
     return 'Room with this name already exists';
   }
 
+  if (duplicateFields.includes('directKey')) {
+    return 'Direct room already exists';
+  }
+
   return 'Resource already exists';
 };
 

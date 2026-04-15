@@ -2,6 +2,7 @@ const express = require('express');
 const authMiddleware = require('../middlewares/authMiddleware');
 const {
   createRoom,
+  createDirectRoom,
   updateRoom,
   getRooms,
   getRoomById,
@@ -17,6 +18,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.post('/', createRoom);
+router.post('/direct', createDirectRoom);
 router.get('/', getRooms);
 router.get('/:id/members', getRoomMembers);
 router.post('/:id/members', addRoomMember);
