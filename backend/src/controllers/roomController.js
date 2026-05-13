@@ -24,6 +24,15 @@ const serializeMember = (member) => ({
   email: member.email,
 });
 
+const isPopulatedMember = (member) =>
+  member && typeof member === 'object' && typeof member.username === 'string';
+
+const serializePopulatedMembers = (members) => {
+  if (!Array.isArray(members) || members.length === 0) return undefined;
+  if (!members.every(isPopulatedMember)) return undefined;
+  return members.map(serializeMember);
+};
+
 const serializeRoom = (room) => {
   const serializedRoom = {
     id: String(room._id),
@@ -32,11 +41,15 @@ const serializeRoom = (room) => {
     createdAt: room.createdAt,
   };
 
-  if (serializedRoom.roomType === 'direct') {
-    serializedRoom.members = Array.isArray(room.members)
-      ? room.members.map(serializeMember)
-      : [];
+  const populatedMembers = serializePopulatedMembers(room.members);
+  if (populatedMembers) {
+    serializedRoom.members = populatedMembers;
+  }
 
+  if (serializedRoom.roomType === 'direct') {
+    if (!serializedRoom.members) {
+      serializedRoom.members = [];
+    }
     return serializedRoom;
   }
 
@@ -100,13 +113,7 @@ const validateRoomName = (value) => {
   return normalizedName;
 };
 
-const validateDirectParticipant = (currentUserId, targetUserId) => {
-  if (targetUserId === currentUserId) {
-    throw httpError(400, 'You cannot create a direct room with yourself');
-  }
-
-  return targetUserId;
-};
+const validateDirectParticipant = (currentUserId, targetUserId) => targetUserId;
 
 const findDirectRoomByMembers = async (memberIds) =>
   Room.findOne({
@@ -155,16 +162,20 @@ const createDirectRoom = asyncHandler(async (req, res) => {
     ensureObjectId(req.body?.userId, 'user id')
   );
 
-  const targetUser = await User.findById(targetUserId).select('_id');
+  const isSelfRoom = targetUserId === currentUserId;
 
-  if (!targetUser) {
-    throw httpError(404, 'User not found');
+  if (!isSelfRoom) {
+    const targetUser = await User.findById(targetUserId).select('_id');
+    if (!targetUser) {
+      throw httpError(404, 'User not found');
+    }
   }
 
-  const existingRoom = await findDirectRoomByMembers([
-    currentUserId,
-    targetUserId,
-  ]);
+  const memberIds = isSelfRoom
+    ? [currentUserId]
+    : [currentUserId, targetUserId];
+
+  const existingRoom = await findDirectRoomByMembers(memberIds);
 
   if (existingRoom) {
     return res.json({
@@ -177,7 +188,7 @@ const createDirectRoom = asyncHandler(async (req, res) => {
     const room = await Room.create({
       roomType: 'direct',
       createdBy: currentUserId,
-      members: [currentUserId, targetUser._id],
+      members: memberIds,
     });
 
     await room.populate('members', 'username email');
@@ -188,7 +199,7 @@ const createDirectRoom = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     if (error?.code === 11000) {
-      const room = await findDirectRoomByMembers([currentUserId, targetUserId]);
+      const room = await findDirectRoomByMembers(memberIds);
 
       if (room) {
         return res.json({

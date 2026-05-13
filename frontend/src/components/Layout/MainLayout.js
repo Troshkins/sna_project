@@ -1,51 +1,47 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useRooms } from '../../context/RoomsContext';
+import Sidebar from '../Sidebar/Sidebar';
 import GraphView from '../Graph/GraphView';
 import ChatWindow from '../Chat/ChatWindow';
-import { useAuth } from '../../context/AuthContext';
 
 const MainLayout = () => {
+  const { rooms } = useRooms();
   const [selectedRoomId, setSelectedRoomId] = useState(null);
-  const { user, logout } = useAuth();
-  const [refreshKey, setRefreshKey] = useState(0);
+
+  // If the selected room vanishes (deleted / left), close the chat
+  useEffect(() => {
+    if (selectedRoomId && !rooms.some((r) => r.id === selectedRoomId)) {
+      setSelectedRoomId(null);
+    }
+  }, [rooms, selectedRoomId]);
 
   const handleSelectRoom = useCallback((roomId) => {
     setSelectedRoomId(roomId);
   }, []);
 
-  const triggerRefresh = () => setRefreshKey(k => k + 1);
+  const handleCloseChat = useCallback(() => {
+    setSelectedRoomId(null);
+  }, []);
 
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
-      <div style={{ flex: 1, position: 'relative' }}>
-        {/* Верхняя панель с информацией и кнопками */}
-        <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span style={{ background: 'var(--bg-secondary)', padding: '4px 12px', borderRadius: 12 }}>
-            {user?.username}
-          </span>
-          <button onClick={triggerRefresh} style={miniButton}>🔄</button>
-          <button onClick={logout} style={miniButton}>Выход</button>
-        </div>
-        <GraphView onSelectRoom={handleSelectRoom} refreshTrigger={refreshKey} />
-      </div>
+    <div className={`app-shell${selectedRoomId ? ' with-chat' : ''}`}>
+      <Sidebar
+        selectedRoomId={selectedRoomId}
+        onSelectRoom={handleSelectRoom}
+      />
+      <GraphView
+        selectedRoomId={selectedRoomId}
+        onSelectRoom={handleSelectRoom}
+      />
       {selectedRoomId && (
-        <div style={{ width: 350, borderLeft: '2px solid var(--accent)' }}>
-          <button onClick={() => setSelectedRoomId(null)} style={{ ...miniButton, margin: 4 }}>
-            ✖ Закрыть чат
-          </button>
-          <ChatWindow roomId={selectedRoomId} />
-        </div>
+        <ChatWindow
+          key={selectedRoomId}
+          roomId={selectedRoomId}
+          onClose={handleCloseChat}
+        />
       )}
     </div>
   );
-};
-
-const miniButton = {
-  background: 'var(--accent)',
-  border: 'none',
-  color: 'white',
-  padding: '4px 10px',
-  borderRadius: 6,
-  cursor: 'pointer'
 };
 
 export default MainLayout;

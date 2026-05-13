@@ -85,10 +85,15 @@ roomSchema.pre('validate', function syncRoomFields() {
   const memberIds = (this.members || []).map(toMemberKey).filter(Boolean);
   const uniqueMemberIds = new Set(memberIds);
 
-  if (memberIds.length !== 2 || uniqueMemberIds.size !== 2) {
+  // Direct rooms are normally 1:1 between two distinct users, but we also
+  // allow a single-member room as the "Saved" / self chat (Telegram-style).
+  const isSelfRoom = memberIds.length === 1;
+  const isPeerRoom = memberIds.length === 2 && uniqueMemberIds.size === 2;
+
+  if (!isSelfRoom && !isPeerRoom) {
     this.invalidate(
       'members',
-      'Direct rooms must have exactly 2 distinct members'
+      'Direct rooms must have 1 member (self chat) or 2 distinct members'
     );
   }
 

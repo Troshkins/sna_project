@@ -1,62 +1,81 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { useAuth } from '../../context/AuthContext';
+import { extractErrorMessage } from '../../api/axios';
 
 const Login = () => {
+  const { login } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login } = useAuth();
-  const navigate = useNavigate();
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSubmitting(true);
     try {
-      await login(email, password);
-      navigate('/');
+      await login(email.trim(), password);
+      navigate('/', { replace: true });
     } catch (err) {
-      setError(err.response?.data?.message || 'Ошибка входа');
+      setError(extractErrorMessage(err, 'Could not sign in'));
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: 400, margin: '100px auto', padding: 20, background: 'var(--bg-secondary)', borderRadius: 12 }}>
-      <h2 style={{ color: 'var(--accent-light)' }}>Вход</h2>
-      <form onSubmit={handleSubmit}>
-        <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required
-          style={inputStyle} />
-        <input type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} required
-          style={inputStyle} />
-        {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
-        <button type="submit" style={buttonStyle}>Войти</button>
-      </form>
-      <p onClick={() => navigate('/register')} style={{ cursor: 'pointer', color: 'var(--accent-light)', marginTop: 10 }}>
-        Нет аккаунта? Зарегистрироваться
-      </p>
+    <div className="auth-screen">
+      <motion.div
+        className="auth-card"
+        initial={{ opacity: 0, y: 16, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
+      >
+        <h1 className="auth-title">Welcome back</h1>
+        <p className="auth-subtitle">Sign in to open your communication graph</p>
+        <form className="auth-form" onSubmit={handleSubmit} noValidate>
+          <div className="field">
+            <label className="field-label" htmlFor="login-email">Email</label>
+            <input
+              id="login-email"
+              name="email"
+              className="input"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              name="password"
+              className="input"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {error && <div className="error-banner">{error}</div>}
+          <button className="btn primary block" type="submit" disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+        <div className="auth-footer">
+          New here? <a onClick={() => navigate('/register')}>Create an account</a>
+        </div>
+      </motion.div>
     </div>
   );
-};
-
-const inputStyle = {
-  width: '100%',
-  padding: 10,
-  margin: '10px 0',
-  background: 'var(--bg-primary)',
-  border: '1px solid var(--accent)',
-  borderRadius: 6,
-  color: 'var(--text-primary)'
-};
-
-const buttonStyle = {
-  width: '100%',
-  padding: 10,
-  background: 'var(--accent)',
-  border: 'none',
-  borderRadius: 6,
-  color: 'var(--text-primary)',
-  fontWeight: 'bold',
-  cursor: 'pointer'
 };
 
 export default Login;
