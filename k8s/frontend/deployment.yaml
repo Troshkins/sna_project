@@ -16,5 +16,6 @@ spec:
       containers:
         - name: frontend
           image: ghcr.io/troshkins/sna-frontend:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

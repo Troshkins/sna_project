@@ -16,6 +16,7 @@ spec:
       containers:
         - name: backend
           image: ghcr.io/troshkins/sna-backend:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
           env:
